@@ -1,0 +1,65 @@
+name: Build
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── C++ / CMake ──────────────────────────────────────────────
+      - name: Configure CMake (x64 Release)
+        working-directory: plugin/cpp
+        run: cmake --preset x64-release
+
+      - name: Build native.dll
+        working-directory: plugin/cpp
+        run: cmake --build --preset x64-release
+
+      # ── JavaScript / Rollup ──────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: plugin/js/package-lock.json
+
+      - name: Install JS dependencies
+        working-directory: plugin/js
+        run: npm ci
+
+      - name: Build plugin.js
+        working-directory: plugin/js
+        run: npm run build
+
+      # ── Package ──────────────────────────────────────────────────
+      - name: Assemble dist
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist_out
+          # native DLL
+          Copy-Item "plugin/cpp/build/x64-release/Release/native.dll" "dist_out/native.dll"
+          # bundled JS (rollup outputs to plugin/js/build/plugin.js)
+          Copy-Item "plugin/js/build/plugin.js" "dist_out/plugin.js"
+          # manifest & preview from public/
+          Copy-Item "plugin/public/manifest.json" "dist_out/manifest.json"
+          Copy-Item "plugin/public/preview.png"   "dist_out/preview.png"
+
+      - name: Create zip
+        shell: pwsh
+        run: Compress-Archive -Path "dist_out/*" -DestinationPath "taskbar-lyrics.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbar-lyrics
+          path: taskbar-lyrics.zip
+          retention-days: 30
